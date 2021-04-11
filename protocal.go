@@ -37,10 +37,21 @@ func listenForConnections(l net.Listener) {
 	}
 }
 
-func connectToPeer(ip, port string) {
-	addr := ip + ":" + port
+func connectToPeer(destinationAddr string) {
 
-	c, err := net.Dial("tcp", addr)
+	// verify you can connect
+	if destinationAddr == localAddress {
+		WriteLn(errorMessages, "Cannot connect to yourslf")
+		return
+	}
+	for _, peerAddr := range peers {
+		if destinationAddr == peerAddr.RemoteAddr().String() {
+			WriteLn(errorMessages, "Already connected")
+			return
+		}
+	}
+
+	c, err := net.Dial("tcp4", destinationAddr)
 	if err != nil {
 		WriteLn(errorMessages, err.Error())
 		return
@@ -54,6 +65,7 @@ func handleConnection(c net.Conn) {
 	peers[addr] = c
 
 	WriteLn(errorMessages, "Added connection "+addr)
+	displayPeers(peers)
 
 	for {
 		dec := gob.NewDecoder(c)
@@ -73,9 +85,13 @@ func handleConnection(c net.Conn) {
 }
 
 func disconnectFromPeer(addr string) {
-	peers[addr].Close()
-	delete(peers, addr)
-	WriteLn(errorMessages, addr+" disconnected")
+	conn, ok := peers[addr]
+	if ok {
+		conn.Close()
+		delete(peers, addr)
+		WriteLn(errorMessages, addr+" disconnected")
+		displayPeers(peers)
+	}
 }
 
 func announceMessage(message Message) {

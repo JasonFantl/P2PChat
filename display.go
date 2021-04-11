@@ -1,24 +1,11 @@
-// Copyright 2019 Google Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-// Binary textinputdemo shows the functionality of a text input field.
 package main
 
 import (
 	"context"
 	"flag"
 	"log"
+	"net"
+	"sort"
 	"time"
 
 	"github.com/mum4k/termdash"
@@ -29,7 +16,6 @@ import (
 	"github.com/mum4k/termdash/terminal/tcell"
 	"github.com/mum4k/termdash/terminal/termbox"
 	"github.com/mum4k/termdash/terminal/terminalapi"
-	"github.com/mum4k/termdash/widgets/button"
 	"github.com/mum4k/termdash/widgets/text"
 	"github.com/mum4k/termdash/widgets/textinput"
 )
@@ -38,13 +24,35 @@ var textInput *textinput.TextInput
 var messageText *text.Text
 var errorMessages *text.Text
 var peersList *text.Text
-var connectButton *button.Button
+var connectField *textinput.TextInput
 
-func newTextInput() (*textinput.TextInput, error) {
+func messagingInput() (*textinput.TextInput, error) {
 	input, err := textinput.New(
-		textinput.Label("Message: ", cell.FgColor(cell.ColorNumber(33))),
+		textinput.Label("Message: ", cell.FgColor(cell.ColorSilver)),
+		textinput.FillColor(cell.ColorDefault),
+		textinput.Border(linestyle.Double),
 		textinput.OnSubmit(func(text string) error {
 			sendMessage(text)
+			return nil
+		}),
+		textinput.ClearOnSubmit(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return input, err
+}
+
+func ConnectInput() (*textinput.TextInput, error) {
+	input, err := textinput.New(
+		textinput.Label("Connect: ", cell.FgColor(cell.ColorCyan)),
+		textinput.FillColor(cell.ColorGray),
+		textinput.OnSubmit(func(text string) error {
+			if text == "" {
+				connectToPeer("127.0.0.1:1234")
+			} else {
+				connectToPeer(text)
+			}
 			return nil
 		}),
 		textinput.ClearOnSubmit(),
@@ -68,25 +76,43 @@ func WriteLn(t *text.Text, text string) {
 	t.Write(text + "\n")
 }
 
+func displayPeers(ips map[string]net.Conn) {
+	peersList.Reset()
+
+	var keys []string
+	for ip := range ips {
+		keys = append(keys, ip)
+	}
+	sort.Strings(keys)
+
+	for _, ip := range keys {
+		WriteLn(peersList, ip)
+	}
+}
+
 func contLayout() ([]container.Option, error) {
 	messagingLayout := []container.Option{
 		container.SplitHorizontal(
 			container.Top(
 				container.PlaceWidget(textInput),
+				container.PaddingRightPercent(10),
+				container.PaddingLeftPercent(10),
 			),
 			container.Bottom(
 				container.Border(linestyle.Light),
 				container.BorderTitle("Chat:"),
 				container.PlaceWidget(messageText),
 			),
-			container.SplitFixed(2),
+			container.SplitFixed(4),
 		),
 	}
 
 	peersLayout := []container.Option{
 		container.SplitHorizontal(
 			container.Top(
-				container.PlaceWidget(connectButton),
+				container.PlaceWidget(connectField),
+				container.PaddingRightPercent(10),
+				container.PaddingLeftPercent(10),
 			),
 			container.Bottom(
 				container.Border(linestyle.Light),
@@ -108,7 +134,10 @@ func contLayout() ([]container.Option, error) {
 			),
 			container.Bottom(
 				container.PlaceWidget(errorMessages),
+				container.Border(linestyle.Double),
+				container.BorderColor(cell.ColorMaroon),
 			),
+			container.SplitPercent(80),
 		),
 	}, nil
 }
@@ -145,7 +174,7 @@ func setupDisplay() {
 		panic(err)
 	}
 	// init al the wigits
-	textInput, err = newTextInput()
+	textInput, err = messagingInput()
 	if err != nil {
 		panic(err)
 	}
@@ -158,13 +187,7 @@ func setupDisplay() {
 		panic(err)
 	}
 
-	connectButton, err = button.New("CONNECT", func() error {
-		connectToPeer("127.0.0.1", "1234")
-		return nil
-	},
-		button.FillColor(cell.ColorNumber(196)),
-		button.Height(1),
-	)
+	connectField, err = ConnectInput()
 	if err != nil {
 		panic(err)
 	}

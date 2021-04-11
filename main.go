@@ -7,36 +7,43 @@ import (
 
 var peers map[string]net.Conn
 var recentMessages []Message
-var addr string
+var localAddress string
 
-var running = true
+var quit chan bool
 
 func main() {
+	quit = make(chan bool)
 	setupDisplay()
 
 	peers = make(map[string]net.Conn)
 	recentMessages = make([]Message, 0)
 
+	// init server and get local addr
 	WriteLn(errorMessages, "Initing server...")
 	server, err := initServer()
-
 	if err != nil {
 		WriteLn(errorMessages, err.Error())
 		return
 	}
 	defer server.Close()
-	addr = server.Addr().String()
+
+	// have to connect to self to get addr
+	c, err := net.Dial("tcp4", server.Addr().String())
+	localAddress = c.LocalAddr().String()
+	c.Close()
 
 	go listenForConnections(server)
 
-	for running {
-
+	// was using for loop, but eats up CPU
+	select {
+	case <-quit:
+		return
 	}
 }
 
 func sendMessage(text string) {
 	announceMessage(Message{
-		Origin:    addr,
+		Origin:    localAddress,
 		Timestamp: time.Now().String(),
 		Data:      text,
 	})
@@ -48,5 +55,5 @@ func close() {
 	terminalCancel()
 	displayTerminal.Close()
 
-	running = false
+	quit <- true
 }
