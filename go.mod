@@ -1,8 +1,8 @@
-module github.com/jasonfantl/tcpBasic
+module github.com/jasonfantl/P2PChat
 
 go 1.15
 
 require (
-	github.com/jroimartin/gocui v0.4.0 // indirect
-	github.com/nsf/termbox-go v1.1.0 // indirect
+	github.com/mum4k/termdash v0.16.0
+	github.com/rivo/uniseg v0.2.0 // indirect
 )

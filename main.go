@@ -1,11 +1,7 @@
 package main
 
 import (
-	"bufio"
-	"fmt"
 	"net"
-	"os"
-	"strings"
 	"time"
 )
 
@@ -13,53 +9,44 @@ var peers map[string]net.Conn
 var recentMessages []Message
 var addr string
 
+var running = true
+
 func main() {
+	setupDisplay()
+
 	peers = make(map[string]net.Conn)
 	recentMessages = make([]Message, 0)
 
+	WriteLn(errorMessages, "Initing server...")
 	server, err := initServer()
 
 	if err != nil {
-		fmt.Println(err)
+		WriteLn(errorMessages, err.Error())
 		return
 	}
 	defer server.Close()
 	addr = server.Addr().String()
 
 	go listenForConnections(server)
-	listenForUserInput()
-}
 
-func listenForUserInput() {
-	for {
-		reader := bufio.NewReader(os.Stdin)
-		text, _ := reader.ReadString('\n')
+	for running {
 
-		if checkCommand(strings.TrimSpace(text)) {
-			break
-		}
 	}
-}
-
-func checkCommand(text string) bool {
-	switch text {
-	case "STOP":
-		return true
-	case "CONNECT":
-		connectToPeer()
-	default:
-		sendMessage(text)
-	}
-
-	return false
 }
 
 func sendMessage(text string) {
-	message := Message{
+	announceMessage(Message{
 		Origin:    addr,
 		Timestamp: time.Now().String(),
 		Data:      text,
-	}
+	})
 
-	announceMessage(message)
+	WriteLn(messageText, text)
+}
+
+func close() {
+	terminalCancel()
+	displayTerminal.Close()
+
+	running = false
 }
