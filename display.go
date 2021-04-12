@@ -49,9 +49,9 @@ func ConnectInput() (*textinput.TextInput, error) {
 		textinput.FillColor(cell.ColorGray),
 		textinput.OnSubmit(func(text string) error {
 			if text == "" {
-				connectToPeer("127.0.0.1:1234")
+				requestConnection("127.0.0.1:1234")
 			} else {
-				connectToPeer(text)
+				requestConnection(text)
 			}
 			return nil
 		}),
@@ -76,16 +76,16 @@ func WriteLn(t *text.Text, text string) {
 	t.Write(text + "\n")
 }
 
-func displayPeers(ips map[string]net.Conn) {
+func displayPeers(conns map[net.Conn]bool) {
 	peersList.Reset()
 
-	var keys []string
-	for ip := range ips {
-		keys = append(keys, ip)
+	var ips []string
+	for conn := range conns {
+		ips = append(ips, conn.RemoteAddr().String())
 	}
-	sort.Strings(keys)
+	sort.Strings(ips)
 
-	for _, ip := range keys {
+	for _, ip := range ips {
 		WriteLn(peersList, ip)
 	}
 }
@@ -95,15 +95,15 @@ func contLayout() ([]container.Option, error) {
 		container.SplitHorizontal(
 			container.Top(
 				container.PlaceWidget(textInput),
-				container.PaddingRightPercent(10),
-				container.PaddingLeftPercent(10),
+				container.PaddingRight(10),
+				container.PaddingLeft(2),
 			),
 			container.Bottom(
 				container.Border(linestyle.Light),
 				container.BorderTitle("Chat:"),
 				container.PlaceWidget(messageText),
 			),
-			container.SplitFixed(4),
+			container.SplitFixed(3),
 		),
 	}
 
@@ -210,7 +210,7 @@ func setupDisplay() {
 
 	quitter := func(k *terminalapi.Keyboard) {
 		if k.Key == keyboard.KeyEsc || k.Key == keyboard.KeyCtrlC {
-			close()
+			quit <- true
 		}
 	}
 	go func() {

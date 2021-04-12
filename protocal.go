@@ -2,105 +2,71 @@ package main
 
 import (
 	"encoding/gob"
-	"errors"
 	"io"
 	"net"
-	"os"
+	"time"
 )
 
-// Message is what is passed over TCP
-type Message struct {
-	Origin    string
-	Timestamp string
+type MessageType byte
+
+const (
+	MESSAGE MessageType = iota
+	CONN_REQ
+)
+
+// Packet is what is passed over TCP
+type Packet struct {
+	Type      MessageType
+	Origin    net.IP
+	Timestamp time.Time
 	Data      string
 }
 
-func initServer() (net.Listener, error) {
-	arguments := os.Args
-	if len(arguments) == 1 {
-		return nil, errors.New("Port required to open server")
-	}
-
-	PORT := ":" + arguments[1]
-	WriteLn(errorMessages, "Listening on "+PORT)
-	return net.Listen("tcp4", PORT)
-}
-
-func listenForConnections(l net.Listener) {
-	for {
-		c, err := l.Accept()
-		if err != nil {
-			WriteLn(errorMessages, err.Error())
-			continue
-		}
-		go handleConnection(c)
-	}
-}
-
-func connectToPeer(destinationAddr string) {
-
-	// verify you can connect
-	if destinationAddr == localAddress {
-		WriteLn(errorMessages, "Cannot connect to yourslf")
-		return
-	}
-	for _, peerAddr := range peers {
-		if destinationAddr == peerAddr.RemoteAddr().String() {
-			WriteLn(errorMessages, "Already connected")
-			return
-		}
-	}
-
-	c, err := net.Dial("tcp4", destinationAddr)
-	if err != nil {
-		WriteLn(errorMessages, err.Error())
-		return
-	}
-
-	go handleConnection(c)
+func (p1 Packet) equals(p2 Packet) bool {
+	return p1.Type == p2.Type &&
+		p1.Origin.Equal(p2.Origin) &&
+		p1.Timestamp.Equal(p2.Timestamp) &&
+		p1.Data == p2.Data
 }
 
 func handleConnection(c net.Conn) {
-	addr := c.RemoteAddr().String()
-	peers[addr] = c
 
-	WriteLn(errorMessages, "Added connection "+addr)
-	displayPeers(peers)
-
-	for {
+	for { // wont eat CPU since it has a blocking function in it
 		dec := gob.NewDecoder(c)
-		message := &Message{}
-		err := dec.Decode(message)
+		message := &Packet{}
+		err := dec.Decode(message) // blocking till we finish reading message
 
-		if err == io.EOF {
-			disconnectFromPeer(addr)
+		if err == io.EOF { // client dissconnected
+			removeConnectionChan <- c
 			break
-		} else if err != nil {
+		} else if err != nil { // error decoding message
 			WriteLn(errorMessages, err.Error())
 			continue
 		}
 
-		recieveMessage(*message)
+		// no errors, handle message
+		recievePacket(*message)
 	}
 }
 
-func disconnectFromPeer(addr string) {
-	conn, ok := peers[addr]
-	if ok {
-		conn.Close()
-		delete(peers, addr)
-		WriteLn(errorMessages, addr+" disconnected")
-		displayPeers(peers)
-	}
+func sendMessage(text string) {
+	announcePacket(Packet{
+		Type:      MESSAGE,
+		Origin:    net.ParseIP(localAddress),
+		Timestamp: time.Now(),
+		Data:      text,
+	})
+
+	WriteLn(messageText, text)
 }
 
-func announceMessage(message Message) {
+func announcePacket(packet Packet) {
 
-	recentMessages = append(recentMessages, message)
+	recentPackets = append(recentPackets, packet)
 
-	for _, peer := range peers {
+	for peer := range peers {
 		encoder := gob.NewEncoder(peer)
-		err := encoder.Encode(message)
+		err := encoder.Encode(packet) // writes to tcp connection
 
 		if err != nil {
 			WriteLn(errorMessages, err.Error())
@@ -108,17 +74,14 @@ func announceMessage(message Message) {
 	}
 }
 
-// !!! NOTE: this is not currently concurrent safe, but being used concurrently
-func recieveMessage(message Message) {
-	for _, oldMessage := range recentMessages {
-		if oldMessage == message {
+func recievePacket(packet Packet) {
+	for _, oldPacket := range recentPackets {
+		if oldPacket.equals(packet) {
 			return
 		}
 	}
 
-	recentMessages = append(recentMessages, message)
+	WriteLn(messageText, packet.Origin.String()+": "+packet.Data)
 
-	WriteLn(messageText, message.Origin+": "+message.Data)
-
-	announceMessage(message)
+	announcePacket(packet)
 }
