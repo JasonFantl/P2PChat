@@ -7,26 +7,19 @@ import (
 	"time"
 )
 
-type MessageType byte
+type PacketType byte
 
 const (
-	MESSAGE MessageType = iota
+	MESSAGE PacketType = iota
 	CONN_REQ
 )
 
 // Packet is what is passed over TCP
 type Packet struct {
-	Type      MessageType
-	Origin    net.IP
-	Timestamp time.Time
+	Type      PacketType
+	Origin    string
+	Timestamp string // if we use time.Time, then == is false betweem a packet and a copy of itself, weird
 	Data      string
-}
-
-func (p1 Packet) equals(p2 Packet) bool {
-	return p1.Type == p2.Type &&
-		p1.Origin.Equal(p2.Origin) &&
-		p1.Timestamp.Equal(p2.Timestamp) &&
-		p1.Data == p2.Data
 }
 
 func handleConnection(c net.Conn) {
@@ -49,11 +42,23 @@ func handleConnection(c net.Conn) {
 	}
 }
 
+func recievePacket(packet Packet) {
+	for _, oldPacket := range recentPackets {
+		if oldPacket == packet {
+			return
+		}
+	}
+
+	WriteLn(messageText, packet.Origin+": "+packet.Data)
+
+	announcePacket(packet)
+}
+
 func sendMessage(text string) {
 	announcePacket(Packet{
 		Type:      MESSAGE,
-		Origin:    net.ParseIP(localAddress),
-		Timestamp: time.Now(),
+		Origin:    localAddress,
+		Timestamp: time.Now().String(),
 		Data:      text,
 	})
 
@@ -72,16 +77,4 @@ func announcePacket(packet Packet) {
 			WriteLn(errorMessages, err.Error())
 		}
 	}
-}
-
-func recievePacket(packet Packet) {
-	for _, oldPacket := range recentPackets {
-		if oldPacket.equals(packet) {
-			return
-		}
-	}
-
-	WriteLn(messageText, packet.Origin.String()+": "+packet.Data)
-
-	announcePacket(packet)
 }

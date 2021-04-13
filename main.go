@@ -32,7 +32,8 @@ func main() {
 
 	// have to connect to self to get addr
 	c, err := net.Dial("tcp4", server.Addr().String())
-	localAddress = c.LocalAddr().String()
+	localAddress = c.RemoteAddr().String()
+	WriteLn(errorMessages, localAddress)
 	c.Close()
 
 	go listenForConnections(server)
