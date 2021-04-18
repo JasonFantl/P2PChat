@@ -49,9 +49,9 @@ func ConnectInput() (*textinput.TextInput, error) {
 		textinput.FillColor(cell.ColorGray),
 		textinput.OnSubmit(func(text string) error {
 			if text == "" {
-				requestConnection("127.0.0.1:1234")
+				enterNetwork("127.0.0.1:1234")
 			} else {
-				requestConnection(text)
+				enterNetwork(text)
 			}
 			return nil
 		}),
@@ -137,7 +137,7 @@ func contLayout() ([]container.Option, error) {
 				container.Border(linestyle.Double),
 				container.BorderColor(cell.ColorMaroon),
 			),
-			container.SplitPercent(80),
+			container.SplitPercent(50),
 		),
 	}, nil
 }

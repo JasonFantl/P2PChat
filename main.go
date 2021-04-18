@@ -2,24 +2,29 @@ package main
 
 import (
 	"net"
+	"os"
 )
 
 var peers map[net.Conn]bool
-var recentPackets []Packet
+var recentPackets map[Packet]bool // may want to make into max length queue later
 var localAddress string
 
 var quit chan bool
-var newConnectionChan, removeConnectionChan chan net.Conn
+var addConnectionChan, removePeerChan chan net.Conn
+var packetChan chan Packet
 
 func main() {
-	quit = make(chan bool)
-	newConnectionChan = make(chan net.Conn)
-	removeConnectionChan = make(chan net.Conn)
 
-	setupDisplay()
+	// init channels and other vars
+	quit = make(chan bool)
+	addConnectionChan = make(chan net.Conn)
+	removePeerChan = make(chan net.Conn)
+	packetChan = make(chan Packet)
 
 	peers = make(map[net.Conn]bool)
-	recentPackets = make([]Packet, 0)
+	recentPackets = make(map[Packet]bool)
+
+	setupDisplay()
 
 	// init server and get local addr
 	WriteLn(errorMessages, "Initing server...")
@@ -33,7 +38,7 @@ func main() {
 	// have to connect to self to get addr
 	c, err := net.Dial("tcp4", server.Addr().String())
 	localAddress = c.RemoteAddr().String()
-	WriteLn(errorMessages, localAddress)
+	WriteLn(errorMessages, "obtained local address: "+localAddress)
 	c.Close()
 
 	go listenForConnections(server)
@@ -45,10 +50,23 @@ func main() {
 			terminalCancel()
 			displayTerminal.Close()
 			return
-		case newConn := <-newConnectionChan:
+		case newConn := <-addConnectionChan:
 			addConnection(newConn)
-		case oldConn := <-removeConnectionChan:
+		case oldConn := <-removePeerChan:
 			removeConnection(oldConn)
+		case newPacket := <-packetChan:
+			go recievePacket(newPacket)
 		}
 	}
+}
+
+func initServer() (net.Listener, error) {
+	arguments := os.Args
+	PORT := ":" + arguments[1]
+	if len(arguments) == 1 {
+		PORT = ":1234"
+	}
+
+	WriteLn(errorMessages, "Listening on "+PORT)
+	return net.Listen("tcp4", PORT)
 }
