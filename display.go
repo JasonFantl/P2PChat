@@ -4,8 +4,8 @@ import (
 	"context"
 	"flag"
 	"log"
-	"net"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/mum4k/termdash"
@@ -76,12 +76,12 @@ func WriteLn(t *text.Text, text string) {
 	t.Write(text + "\n")
 }
 
-func displayPeers(conns map[net.Conn]bool) {
+func displayPeers() {
 	peersList.Reset()
 
 	var ips []string
-	for conn := range conns {
-		ips = append(ips, conn.RemoteAddr().String())
+	for peer := range peers {
+		ips = append(ips, peer.meta.Username+" "+strconv.Itoa(peer.meta.ConnectionCount))
 	}
 	sort.Strings(ips)
 
