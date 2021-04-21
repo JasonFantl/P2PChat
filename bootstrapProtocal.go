@@ -4,6 +4,7 @@ import (
 	"encoding/gob"
 	"io"
 	"net"
+	"time"
 )
 
 // listens for new TCP connections
@@ -51,13 +52,29 @@ func recieveConnectionAcknowledgment(conn net.Conn, carrier Carrier) {
 		return
 	}
 
-	WriteLn(errorMessages, "got connection acknowledge, adding to peers")
+	if _, ok := peers[carrier.Meta.GID]; ok {
+		WriteLn(errorMessages, "already connected to "+carrier.Meta.GID)
+		return
+	}
+
+	WriteLn(errorMessages, "got connection acknowledge from "+carrier.Meta.GID)
 
 	newPeer := Peer{
 		connection: conn,
 		meta:       carrier.Meta,
 	}
 	addPeerChan <- &newPeer
+}
+
+// adds a connection our list of peers
+func addPeer(peer *Peer) {
+	peers[peer.meta.GID] = peer
+	WriteLn(errorMessages, "Added connection "+peer.connection.RemoteAddr().String()+" to peers")
+
+	sendAck(peer.connection)
+	displayPeers()
+
+	go handlePeer(peer)
 }
 
 // creates the connection to a machine
@@ -68,9 +85,9 @@ func requestConnection(destinationAddr string) (net.Conn, bool) {
 		WriteLn(errorMessages, "Cannot connect to yourself")
 		return nil, false
 	}
-	for peer := range peers {
+	for _, peer := range peers {
 		if destinationAddr == peer.connection.RemoteAddr().String() {
-			WriteLn(errorMessages, "Already connected")
+			WriteLn(errorMessages, "Already connected to "+destinationAddr)
 			return nil, false
 		}
 	}
@@ -80,19 +97,8 @@ func requestConnection(destinationAddr string) (net.Conn, bool) {
 		WriteLn(errorMessages, err.Error())
 		return nil, false
 	}
-
+	WriteLn(errorMessages, "connection established with "+destinationAddr)
 	return conn, true
-}
-
-// adds a connection our list of peers
-func addPeer(peer *Peer) {
-	peers[peer] = true
-
-	WriteLn(errorMessages, "Added connection "+peer.connection.RemoteAddr().String()+" to peers, sending ACK")
-	sendAck(peer.connection)
-	displayPeers()
-
-	go handlePeer(peer)
 }
 
 // creates connection, sends request, then closes. We will get a new connection if someone accepts
@@ -103,25 +109,27 @@ func enterNetwork(bootstrapIP string) {
 		return
 	}
 
-	WriteLn(errorMessages, "sending connection request to "+bootstrapIP)
 	sendConnReq(tmpConn)
 	tmpConn.Close()
 	WriteLn(errorMessages, "closed connection from "+bootstrapIP)
 }
 
 func sendAck(c net.Conn) {
+	WriteLn(errorMessages, "Sending CONN_ACK to "+c.RemoteAddr().String())
 	ack := Packet{
-		Type:   CONN_ACK,
-		Origin: localAddress,
+		Type:      CONN_ACK,
+		Origin:    localAddress,
+		Timestamp: time.Now().String(),
 	}
 	sendPacket(c, ack)
 }
 
 func sendConnReq(c net.Conn) {
-	WriteLn(errorMessages, "Sending out CONN_REQ to "+c.RemoteAddr().String())
+	WriteLn(errorMessages, "Sending CONN_REQ to "+c.RemoteAddr().String())
 	connReq := Packet{
-		Type:   CONN_REQ,
-		Origin: localAddress,
+		Type:      CONN_REQ,
+		Origin:    localAddress,
+		Timestamp: time.Now().String(),
 	}
 	sendPacket(c, connReq)
 }

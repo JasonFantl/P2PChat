@@ -80,8 +80,8 @@ func displayPeers() {
 	peersList.Reset()
 
 	var ips []string
-	for peer := range peers {
-		ips = append(ips, peer.meta.Username+" "+strconv.Itoa(peer.meta.ConnectionCount))
+	for name, peer := range peers {
+		ips = append(ips, name+" "+strconv.Itoa(peer.meta.ConnectionCount))
 	}
 	sort.Strings(ips)
 
