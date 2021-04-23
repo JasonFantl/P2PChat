@@ -80,8 +80,8 @@ func displayPeers() {
 	peersList.Reset()
 
 	var ips []string
-	for name, peer := range peers {
-		ips = append(ips, name+" "+strconv.Itoa(peer.meta.ConnectionCount))
+	for peer := range peers {
+		ips = append(ips, peer.meta.GID+" "+strconv.Itoa(peer.meta.ConnectionCount))
 	}
 	sort.Strings(ips)
 
@@ -157,7 +157,6 @@ func setupDisplay() {
 	terminalPtr := flag.String("terminal",
 		"tcell",
 		"The terminal implementation to use. Available implementations are 'termbox' and 'tcell' (default = tcell).")
-	flag.Parse()
 
 	var err error
 	switch terminal := *terminalPtr; terminal {
@@ -218,4 +217,9 @@ func setupDisplay() {
 			panic(err)
 		}
 	}()
+}
+
+func closeDisplay() {
+	terminalCancel()
+	displayTerminal.Close()
 }

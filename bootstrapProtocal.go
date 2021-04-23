@@ -19,11 +19,11 @@ func listenForConnections(l net.Listener) {
 	}
 }
 
-// asynchronous function, for tmp connections before they become peers. only accepts one packet
-func handleConnection(c net.Conn) {
-	WriteLn(errorMessages, "handling connection: "+c.RemoteAddr().String())
+// asynchronous function, for tmp connections before they become peers. only accepts one packet, then closes
+func handleConnection(conn net.Conn) {
+	WriteLn(errorMessages, "handling connection: "+conn.RemoteAddr().String())
 
-	dec := gob.NewDecoder(c)
+	dec := gob.NewDecoder(conn)
 	carrier := &Carrier{}
 	err := dec.Decode(carrier) // blocking till we finish reading message
 
@@ -36,13 +36,13 @@ func handleConnection(c net.Conn) {
 		case CONN_REQ:
 			recieveConnectionRequest(carrier.Packet)
 		case CONN_ACK:
-			recieveConnectionAcknowledgment(c, *carrier)
-			return // dont want to close a connection we are adding
+			recieveConnectionAcknowledgment(conn, *carrier)
+			return // we have handlePeer that deals with closing the connection now
 		}
 	}
 
-	WriteLn(errorMessages, "stopped handling connection: "+c.RemoteAddr().String())
-	c.Close()
+	WriteLn(errorMessages, "stopped handling connection: "+conn.RemoteAddr().String()+"\n")
+	conn.Close()
 }
 
 func recieveConnectionAcknowledgment(conn net.Conn, carrier Carrier) {
@@ -52,29 +52,20 @@ func recieveConnectionAcknowledgment(conn net.Conn, carrier Carrier) {
 		return
 	}
 
-	if _, ok := peers[carrier.Meta.GID]; ok {
-		WriteLn(errorMessages, "already connected to "+carrier.Meta.GID)
-		return
-	}
+	WriteLn(errorMessages, "got connection acknowledge from "+conn.RemoteAddr().String())
 
-	WriteLn(errorMessages, "got connection acknowledge from "+carrier.Meta.GID)
+	for peer := range peers {
+		if carrier.Meta.GID == peer.meta.GID {
+			WriteLn(errorMessages, "already connected to "+conn.RemoteAddr().String()+"("+carrier.Meta.GID+")")
+			return
+		}
+	}
 
 	newPeer := Peer{
 		connection: conn,
 		meta:       carrier.Meta,
 	}
-	addPeerChan <- &newPeer
-}
-
-// adds a connection our list of peers
-func addPeer(peer *Peer) {
-	peers[peer.meta.GID] = peer
-	WriteLn(errorMessages, "Added connection "+peer.connection.RemoteAddr().String()+" to peers")
-
-	sendAck(peer.connection)
-	displayPeers()
-
-	go handlePeer(peer)
+	handlePeer(&newPeer)
 }
 
 // creates the connection to a machine
@@ -85,7 +76,7 @@ func requestConnection(destinationAddr string) (net.Conn, bool) {
 		WriteLn(errorMessages, "Cannot connect to yourself")
 		return nil, false
 	}
-	for _, peer := range peers {
+	for peer := range peers {
 		if destinationAddr == peer.connection.RemoteAddr().String() {
 			WriteLn(errorMessages, "Already connected to "+destinationAddr)
 			return nil, false
@@ -108,28 +99,35 @@ func enterNetwork(bootstrapIP string) {
 	if !ok {
 		return
 	}
-
 	sendConnReq(tmpConn)
 	tmpConn.Close()
-	WriteLn(errorMessages, "closed connection from "+bootstrapIP)
+	WriteLn(errorMessages, "closed connection to "+bootstrapIP+"\n")
 }
 
 func sendAck(c net.Conn) {
-	WriteLn(errorMessages, "Sending CONN_ACK to "+c.RemoteAddr().String())
+	WriteLn(errorMessages, "sending CONN_ACK to "+c.RemoteAddr().String())
 	ack := Packet{
-		Type:      CONN_ACK,
-		Origin:    localAddress,
+		Type: CONN_ACK,
+		// ACK origin is recognized by the connetion it came over, no need for origin field
 		Timestamp: time.Now().String(),
 	}
 	sendPacket(c, ack)
 }
 
 func sendConnReq(c net.Conn) {
-	WriteLn(errorMessages, "Sending CONN_REQ to "+c.RemoteAddr().String())
+	WriteLn(errorMessages, "sending CONN_REQ to "+c.RemoteAddr().String())
 	connReq := Packet{
 		Type:      CONN_REQ,
 		Origin:    localAddress,
 		Timestamp: time.Now().String(),
 	}
 	sendPacket(c, connReq)
+}
+
+func announceBlank() {
+	WriteLn(errorMessages, "announcing BLANK")
+	blank := Packet{
+		Type: BLANK,
+	}
+	announcePacket(blank)
 }

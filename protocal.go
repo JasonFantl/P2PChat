@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-var MIN_DESIRED_PEERS = 3
+var MIN_DESIRED_PEERS = 2
 
 type PacketType byte
 
@@ -15,6 +15,7 @@ const (
 	MESSAGE PacketType = iota
 	CONN_REQ
 	CONN_ACK
+	BLANK // used to just send meta data, packet is empty
 )
 
 type Packet struct {
@@ -31,13 +32,22 @@ type Carrier struct {
 
 // asynchronous function, a different instance is run for each peer
 func handlePeer(peer *Peer) {
-	for { // wont eat CPU since it has a blocking function in it
+
+	waitPeers.Add(1)
+	addPeerChan <- peer
+	waitPeers.Wait()
+
+	WriteLn(errorMessages, "added connection "+peer.connection.RemoteAddr().String()+"("+peer.meta.GID+")"+" to peers")
+
+	announceBlank() // to update our neighbors of our new peer count
+
+	// dont return in this loop, have some cleaning up to do afterward
+	for {
 		dec := gob.NewDecoder(peer.connection)
 		carrier := &Carrier{}
 		err := dec.Decode(carrier) // blocking till we finish reading message
 
 		if err == io.EOF { // client disconnected
-			removePeerChan <- peer
 			break
 		} else if err != nil { // error decoding message
 			WriteLn(errorMessages, err.Error())
@@ -50,12 +60,19 @@ func handlePeer(peer *Peer) {
 		displayPeers()
 		recievePacket(carrier.Packet)
 	}
+
+	WriteLn(errorMessages, "stopped handling peer "+peer.connection.RemoteAddr().String()+"("+peer.meta.GID+")\n")
+	peer.connection.Close()
+
+	waitPeers.Add(1)
+	removePeerChan <- peer // update the peer list
+	waitPeers.Wait()
+
+	announceBlank() // to update our neighbors of our new peer count
 }
 
-// called as a go routine
 func recievePacket(packet Packet) {
-
-	// check we havent seen this packet before (may not always be true, probably have to change later)
+	// check we havent seen this packet before (may not always be a good idea, probably have to change later)
 	for oldPacket := range recentPackets {
 		if oldPacket == packet {
 			return
@@ -69,21 +86,25 @@ func recievePacket(packet Packet) {
 		recieveMessage(packet)
 	case CONN_REQ:
 		recieveConnectionRequest(packet)
-	case CONN_ACK:
 		// we ignore CONN_ACK since they only act as meta data updters, done in recievePacket func. use this oppertunity to check some stuff
+	case CONN_ACK:
 
-		// there must be a better place to put this, and a way to make modular, tied to handleReq func
-		// check if we have as many connections as we want
-		if len(peers) < MIN_DESIRED_PEERS {
-			var peerToPassTo *Peer = nil
-			// get peer with lowest connection count
-			for _, peer := range peers {
-				if peerToPassTo == nil || peer.meta.ConnectionCount < peerToPassTo.meta.ConnectionCount {
-					peerToPassTo = peer
-				}
-			}
-			sendConnReq(peerToPassTo.connection)
-		}
+		// // there must be a better place to put this, and a way to make modular, tied to handleReq func
+		// // check if we have as many connections as we want
+		// if len(peers) < MIN_DESIRED_PEERS {
+		// 	var peerToPassTo *Peer = nil
+		// 	// get peer with lowest connection count
+		// 	for _, peer := range peers {
+		// 		if peerToPassTo == nil || peer.meta.ConnectionCount < peerToPassTo.meta.ConnectionCount {
+		// 			peerToPassTo = peer
+		// 		}
+		// 	}
+
+		// 	if peerToPassTo != nil {
+		// 		sendConnReq(peerToPassTo.connection)
+		// 	}
+		// }
+
 	}
 }
 
@@ -101,7 +122,7 @@ func recieveConnectionRequest(packet Packet) {
 
 	var peerToPassTo *Peer = nil
 	// get peer with lowest connection count
-	for _, peer := range peers {
+	for peer := range peers {
 		if peer.meta.GID != packet.Origin { // dont pass to the node trying to connect
 			if peerToPassTo == nil || peer.meta.ConnectionCount < peerToPassTo.meta.ConnectionCount {
 				peerToPassTo = peer
@@ -115,10 +136,14 @@ func recieveConnectionRequest(packet Packet) {
 
 	if peerToPassTo == nil {
 		WriteLn(errorMessages, "got connection request from "+packet.Origin+", accepting")
+
 		conn, ok := requestConnection(packet.Origin)
 		if ok {
-			sendAck(conn)
-			go handleConnection(conn)
+			newPeer := Peer{
+				connection: conn,
+			}
+			sendAck(conn) // let them know they are a peer now
+			go handlePeer(&newPeer)
 		}
 	} else {
 		WriteLn(errorMessages, "got connection request from "+packet.Origin+", forwarding to "+peerToPassTo.connection.RemoteAddr().String())
@@ -126,34 +151,12 @@ func recieveConnectionRequest(packet Packet) {
 	}
 }
 
-// removes a connection from our list of peers
-func removePeer(peer *Peer) {
-	_, ok := peers[peer.meta.GID]
-	if ok {
-		WriteLn(errorMessages, peer.connection.RemoteAddr().String()+" disconnected")
-		peer.connection.Close()
-		delete(peers, peer.meta.GID)
-		displayPeers()
-
-		// // then try to make a new connection
-		// connReq := Packet{
-		// 	Type:      CONN_REQ,
-		// 	Origin:    localAddress,
-		// 	Timestamp: time.Now().String(),
-		// }
-		// // send to random peer
-		// for peerToPassTo := range peers {
-		// 	WriteLn(errorMessages, "passing request to "+peerToPassTo.RemoteAddr().String())
-		// 	sendPacket(peerToPassTo, connReq)
-		// 	break
-		// }
-	}
-}
-
 // sends packet to all peers
 func announcePacket(packet Packet) {
-	for _, peer := range peers {
-		sendPacket(peer.connection, packet)
+	for peer := range peers {
+		if peer.connection.RemoteAddr().String() != packet.Origin {
+			sendPacket(peer.connection, packet)
+		}
 	}
 }
 
@@ -177,6 +180,7 @@ func sendPacket(connection net.Conn, packet Packet) {
 
 // GUI call
 func sendMessage(text string) {
+	WriteLn(messageText, text)
 
 	msgPacket := Packet{
 		Type:      MESSAGE,
@@ -186,6 +190,4 @@ func sendMessage(text string) {
 	}
 
 	announcePacket(msgPacket)
-
-	WriteLn(messageText, text)
 }

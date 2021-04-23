@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"net"
 	"os"
+	"sync"
 )
 
 type PeerMeta struct {
@@ -15,13 +17,14 @@ type Peer struct {
 	meta       PeerMeta
 }
 
-var peers map[string]*Peer
+var peers map[*Peer]bool
 var recentPackets map[Packet]bool // may want to make into max length queue later
 var localAddress string
 
 var quit chan bool
 var addPeerChan chan *Peer
 var removePeerChan chan *Peer
+var waitPeers sync.WaitGroup
 
 var GID string
 
@@ -32,25 +35,25 @@ func main() {
 	addPeerChan = make(chan *Peer)
 	removePeerChan = make(chan *Peer)
 
-	peers = make(map[string]*Peer)
+	peers = make(map[*Peer]bool)
 	recentPackets = make(map[Packet]bool)
 
-	setupDisplay()
-
 	// init server and get local addr
-	WriteLn(errorMessages, "Initing server...")
 	server, err := initServer()
 	if err != nil {
-		WriteLn(errorMessages, err.Error())
+		fmt.Printf(err.Error())
 		return
 	}
 	defer server.Close()
+
+	setupDisplay() // after this use WriteLn(errorMessage, string) instead of Println(string)
+	defer closeDisplay()
 
 	// have to connect to self to get addr
 	c, err := net.Dial("tcp4", server.Addr().String())
 	localAddress = c.RemoteAddr().String()
 	c.Close()
-	WriteLn(errorMessages, "obtained local address: "+localAddress)
+	WriteLn(errorMessages, "Listening on: "+localAddress)
 
 	GID = localAddress
 
@@ -61,25 +64,54 @@ func main() {
 	for {
 		select {
 		case <-quit:
-			terminalCancel()
-			displayTerminal.Close()
 			return
 		case newPeer := <-addPeerChan:
 			addPeer(newPeer)
+			waitPeers.Done()
 		case oldPeer := <-removePeerChan:
 			removePeer(oldPeer)
+			waitPeers.Done()
 		}
 	}
 }
 
+// adds a connection our list of peers
+func addPeer(peer *Peer) {
+	peers[peer] = true
+	displayPeers()
+}
+
+// removes a connection from our list of peers
+func removePeer(peer *Peer) {
+	_, ok := peers[peer]
+	if ok {
+		delete(peers, peer)
+		displayPeers()
+
+		// // then try to make a new connection
+		// connReq := Packet{
+		// 	Type:      CONN_REQ,
+		// 	Origin:    localAddress,
+		// 	Timestamp: time.Now().String(),
+		// }
+		// // send to random peer
+		// for peerToPassTo := range peers {
+		// 	WriteLn(errorMessages, "passing request to "+peerToPassTo.RemoteAddr().String())
+		// 	sendPacket(peerToPassTo, connReq)
+		// 	break
+		// }
+	}
+}
+
 func initServer() (net.Listener, error) {
+	fmt.Println("Initing server...")
 	arguments := os.Args
-	PORT := ":" + arguments[1]
-	if len(arguments) == 1 {
-		PORT = ":1234"
+	PORT := ":1234"
+
+	if len(arguments) > 1 {
+		PORT = ":" + arguments[1]
 	}
 
-	WriteLn(errorMessages, "Listening on "+PORT)
 	return net.Listen("tcp4", PORT)
 }
 
