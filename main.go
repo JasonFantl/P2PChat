@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 )
 
 type PeerMeta struct {
@@ -88,18 +89,13 @@ func removePeer(peer *Peer) {
 		delete(peers, peer)
 		displayPeers()
 
-		// // then try to make a new connection
-		// connReq := Packet{
-		// 	Type:      CONN_REQ,
-		// 	Origin:    localAddress,
-		// 	Timestamp: time.Now().String(),
-		// }
-		// // send to random peer
-		// for peerToPassTo := range peers {
-		// 	WriteLn(errorMessages, "passing request to "+peerToPassTo.RemoteAddr().String())
-		// 	sendPacket(peerToPassTo, connReq)
-		// 	break
-		// }
+		WriteLn(errorMessages, "disconnected, sending out new CONN_REQ")
+		connReq := Packet{
+			Type:      CONN_REQ,
+			Origin:    localAddress,
+			Timestamp: time.Now().String(),
+		}
+		recieveConnectionRequest(connReq)
 	}
 }
 

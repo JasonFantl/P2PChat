@@ -87,24 +87,6 @@ func recievePacket(packet Packet) {
 	case CONN_REQ:
 		recieveConnectionRequest(packet)
 		// we ignore CONN_ACK since they only act as meta data updters, done in recievePacket func. use this oppertunity to check some stuff
-	case CONN_ACK:
-
-		// // there must be a better place to put this, and a way to make modular, tied to handleReq func
-		// // check if we have as many connections as we want
-		// if len(peers) < MIN_DESIRED_PEERS {
-		// 	var peerToPassTo *Peer = nil
-		// 	// get peer with lowest connection count
-		// 	for _, peer := range peers {
-		// 		if peerToPassTo == nil || peer.meta.ConnectionCount < peerToPassTo.meta.ConnectionCount {
-		// 			peerToPassTo = peer
-		// 		}
-		// 	}
-
-		// 	if peerToPassTo != nil {
-		// 		sendConnReq(peerToPassTo.connection)
-		// 	}
-		// }
-
 	}
 }
 
@@ -131,19 +113,26 @@ func recieveConnectionRequest(packet Packet) {
 	}
 	// set to nil if we are the peer with smallest number of connection
 	if peerToPassTo != nil && peerToPassTo.meta.ConnectionCount >= len(peers) {
-		peerToPassTo = nil
+		// check we arnt sending the packet for ourselves, then it needs to be sent even if we have the smallest count
+		if packet.Origin != localAddress {
+			peerToPassTo = nil
+		}
 	}
 
 	if peerToPassTo == nil {
-		WriteLn(errorMessages, "got connection request from "+packet.Origin+", accepting")
+		if packet.Origin == localAddress {
+			WriteLn(errorMessages, "cannot request connection to self")
+		} else {
+			WriteLn(errorMessages, "got connection request from "+packet.Origin+", accepting")
 
-		conn, ok := requestConnection(packet.Origin)
-		if ok {
-			newPeer := Peer{
-				connection: conn,
+			conn, ok := requestConnection(packet.Origin)
+			if ok {
+				newPeer := Peer{
+					connection: conn,
+				}
+				sendAck(conn) // let them know they are a peer now
+				go handlePeer(&newPeer)
 			}
-			sendAck(conn) // let them know they are a peer now
-			go handlePeer(&newPeer)
 		}
 	} else {
 		WriteLn(errorMessages, "got connection request from "+packet.Origin+", forwarding to "+peerToPassTo.connection.RemoteAddr().String())
