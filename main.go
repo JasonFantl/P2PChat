@@ -1,119 +1,118 @@
 package main
 
 import (
-	"fmt"
-	"net"
-	"os"
-	"sync"
-	"time"
+	"encoding/gob"
+	"encoding/hex"
+
+	"github.com/jasonfantl/P2PChat/P2Proto"
 )
 
-type PeerMeta struct {
-	ConnectionCount int
-	GID             string
-}
-
-type Peer struct {
-	connection net.Conn
-	meta       PeerMeta
-}
-
-var peers map[*Peer]bool
-var recentPackets map[Packet]bool // may want to make into max length queue later
-var localAddress string
-
 var quit chan bool
-var addPeerChan chan *Peer
-var removePeerChan chan *Peer
-var waitPeers sync.WaitGroup
 
-var GID string
+type chatroom struct {
+	name    string
+	key     []byte
+	history []string
+}
 
-func main() {
+var chatrooms map[string]*chatroom
+var currentRoomName string
 
-	// init channels and other vars
-	quit = make(chan bool)
-	addPeerChan = make(chan *Peer)
-	removePeerChan = make(chan *Peer)
+// func createChatRoom(name string) {
+// 	key := make([]byte, 32) //generate a random 32 byte key for AES-256
+// 	if _, err := rand.Read(key); err != nil {
+// 		panic(err.Error())
+// 	}
 
-	peers = make(map[*Peer]bool)
-	recentPackets = make(map[Packet]bool)
+// 	addChatRoom(name, key)
+// }
 
-	// init server and get local addr
-	server, err := initServer()
-	if err != nil {
-		fmt.Printf(err.Error())
+func addChatRoom(name string, key []byte) {
+	if _, exist := chatrooms[name]; exist {
 		return
 	}
-	defer server.Close()
 
-	setupDisplay() // after this use WriteLn(errorMessage, string) instead of Println(string)
+	chatrooms[name] = &chatroom{
+		name:    name,
+		key:     key,
+		history: make([]string, 0),
+	}
+
+	// update display
+	c.Update(chatID, generateChatLayout()...)
+}
+
+type Message []byte
+
+func recievePacket(packet P2Proto.Packet) {
+	if packet.Type == P2Proto.MESSAGE {
+		message := packet.Payload.(Message)
+
+		for _, chatroom := range chatrooms {
+			decrypted, ok := decrypt(message, chatroom.key)
+			if !ok {
+				continue
+			}
+
+			plaintext := string(decrypted)
+
+			text := packet.Origin + ": " + plaintext
+
+			if currentRoomName == chatroom.name {
+				WriteLn(messageText, text)
+			}
+			chatroom.history = append(chatroom.history, text)
+
+		}
+	}
+}
+
+func sendMessage(plaintext string) error {
+
+	chatroom, ok := chatrooms[currentRoomName]
+	if !ok {
+		logger("invalid chatroom")
+		return nil
+	}
+
+	WriteLn(messageText, plaintext)
+	chatroom.history = append(chatroom.history, plaintext)
+
+	encrypted := Message(encrypt([]byte(plaintext), chatroom.key))
+
+	P2Proto.SendMessage(encrypted)
+	return nil
+}
+
+func main() {
+	gob.Register(Message{})
+
+	quit = make(chan bool)
+	chatrooms = make(map[string]*chatroom)
+
+	setupDisplay()
 	defer closeDisplay()
 
-	// have to connect to self to get addr
-	c, err := net.Dial("tcp4", server.Addr().String())
-	localAddress = c.RemoteAddr().String()
-	c.Close()
-	WriteLn(errorMessages, "Listening on: "+localAddress)
+	key, _ := hex.DecodeString("6368616e676520746869732070617373776f726420746f206120736563726574")
+	addChatRoom("test room", key)
 
-	GID = localAddress
+	key2, _ := hex.DecodeString("6368616e676520746869732070617373776f726420746f206120736563726575")
+	addChatRoom("test room 2", key2)
 
-	go listenForConnections(server)
-	WriteLn(errorMessages, "\n")
+	updatePeers := func(peers P2Proto.PeerList) {
+		displayPeers(peers)
+	}
 
-	// was using for loop, but eats up CPU
+	go P2Proto.Setup(recievePacket, updatePeers, logger)
+
 	for {
 		select {
 		case <-quit:
 			return
-		case newPeer := <-addPeerChan:
-			addPeer(newPeer)
-			waitPeers.Done()
-		case oldPeer := <-removePeerChan:
-			removePeer(oldPeer)
-			waitPeers.Done()
 		}
 	}
 }
 
-// adds a connection our list of peers
-func addPeer(peer *Peer) {
-	peers[peer] = true
-	displayPeers()
-}
-
-// removes a connection from our list of peers
-func removePeer(peer *Peer) {
-	_, ok := peers[peer]
-	if ok {
-		delete(peers, peer)
-		displayPeers()
-
-		WriteLn(errorMessages, "disconnected, sending out new CONN_REQ")
-		connReq := Packet{
-			Type:      CONN_REQ,
-			Origin:    localAddress,
-			Timestamp: time.Now().String(),
-		}
-		recieveConnectionRequest(connReq)
-	}
-}
-
-func initServer() (net.Listener, error) {
-	fmt.Println("Initing server...")
-	arguments := os.Args
-	PORT := ":1234"
-
-	if len(arguments) > 1 {
-		PORT = ":" + arguments[1]
-	}
-
-	return net.Listen("tcp4", PORT)
-}
-
-func getMyMeta() PeerMeta {
-	return PeerMeta{
-		ConnectionCount: len(peers),
-		GID:             GID,
-	}
+func logger(s string) {
+	WriteLn(errorMessages, s)
 }
